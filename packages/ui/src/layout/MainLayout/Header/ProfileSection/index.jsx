@@ -1,13 +1,15 @@
-import { useState, useRef, useEffect } from 'react'
+import { REMOVE_DIRTY, closeSnackbar as closeSnackbarAction, enqueueSnackbar as enqueueSnackbarAction } from '@/store/actions'
+import { sanitizeChatflows } from '@/utils/genericHelper'
+import useNotifier from '@/utils/useNotifier'
 import PropTypes from 'prop-types'
-import { useSelector } from 'react-redux'
-
+import { useEffect, useRef, useState } from 'react'
+import { useDispatch, useSelector } from 'react-redux'
 // material-ui
-import { useTheme } from '@mui/material/styles'
 import {
-    Box,
-    ButtonBase,
     Avatar,
+    Box,
+    Button,
+    ButtonBase,
     ClickAwayListener,
     Divider,
     List,
@@ -18,19 +20,25 @@ import {
     Popper,
     Typography
 } from '@mui/material'
+import { useTheme } from '@mui/material/styles'
 
 // third-party
 import PerfectScrollbar from 'react-perfect-scrollbar'
 
 // project imports
 import MainCard from '@/ui-component/cards/MainCard'
-import Transitions from '@/ui-component/extended/Transitions'
 import AboutDialog from '@/ui-component/dialog/AboutDialog'
+import Transitions from '@/ui-component/extended/Transitions'
 
 // assets
-import { IconLogout, IconSettings, IconInfoCircle } from '@tabler/icons-react'
-
+import { IconFileExport, IconFileUpload, IconInfoCircle, IconLogout, IconSettings, IconX } from '@tabler/icons-react'
 import './index.css'
+
+//API
+import chatFlowsApi from '@/api/chatflows'
+
+// Hooks
+import useApi from '@/hooks/useApi'
 
 // ==============================|| PROFILE MENU ||============================== //
 
@@ -43,6 +51,14 @@ const ProfileSection = ({ username, handleLogout }) => {
     const [aboutDialogOpen, setAboutDialogOpen] = useState(false)
 
     const anchorRef = useRef(null)
+    const inputRef = useRef()
+
+    // ==============================|| Snackbar ||============================== //
+
+    useNotifier()
+    const dispatch = useDispatch()
+    const enqueueSnackbar = (...args) => dispatch(enqueueSnackbarAction(...args))
+    const closeSnackbar = (...args) => dispatch(closeSnackbarAction(...args))
 
     const handleClose = (event) => {
         if (anchorRef.current && anchorRef.current.contains(event.target)) {
@@ -54,6 +70,97 @@ const ProfileSection = ({ username, handleLogout }) => {
     const handleToggle = () => {
         setOpen((prevOpen) => !prevOpen)
     }
+
+    const errorFailed = (message) => {
+        enqueueSnackbar({
+            message: message,
+            options: {
+                key: new Date().getTime() + Math.random(),
+                variant: 'error',
+                persist: true,
+                action: (key) => (
+                    <Button style={{ color: 'white' }} onClick={() => closeSnackbar(key)}>
+                        <IconX />
+                    </Button>
+                )
+            }
+        })
+    }
+    const saveAllChatflowsApi = useApi(chatFlowsApi.createNewChatflows)
+    const fileChange = (e) => {
+        if (!e.target.files) return
+
+        const file = e.target.files[0]
+
+        const reader = new FileReader()
+        reader.onload = (evt) => {
+            if (!evt?.target?.result) {
+                return
+            }
+            const chatflows = JSON.parse(evt.target.result)
+            saveAllChatflowsApi.request(chatflows)
+        }
+        reader.readAsText(file)
+    }
+
+    const saveAllChatflowsSuccess = () => {
+        dispatch({ type: REMOVE_DIRTY })
+        enqueueSnackbar({
+            message: `Save All Chatflows Successful`,
+            options: {
+                key: new Date().getTime() + Math.random(),
+                variant: 'success',
+                action: (key) => (
+                    <Button style={{ color: 'white' }} onClick={() => closeSnackbar(key)}>
+                        <IconX />
+                    </Button>
+                )
+            }
+        })
+    }
+    useEffect(() => {
+        if (saveAllChatflowsApi.error) errorFailed(`Failed to save Chatflows: ${saveAllChatflowsApi.error.response.data.message}`)
+        if (saveAllChatflowsApi.data) {
+            saveAllChatflowsSuccess()
+        }
+    }, [saveAllChatflowsApi.error, saveAllChatflowsApi.data])
+    const importAllChatflows = () => {
+        inputRef.current.click()
+    }
+    const getAllChatflowsApi = useApi(chatFlowsApi.getAllChatflows)
+
+    const exportAllChatflowsSuccess = () => {
+        dispatch({ type: REMOVE_DIRTY })
+        enqueueSnackbar({
+            message: `Export All Chatflows Successful`,
+            options: {
+                key: new Date().getTime() + Math.random(),
+                variant: 'success',
+                action: (key) => (
+                    <Button style={{ color: 'white' }} onClick={() => closeSnackbar(key)}>
+                        <IconX />
+                    </Button>
+                )
+            }
+        })
+    }
+
+    useEffect(() => {
+        if (getAllChatflowsApi.error) errorFailed(`Failed to retrieve Chatflows: ${getAllChatflowsApi.error.response.data.message}`)
+        if (getAllChatflowsApi.data) {
+            const sanitizedChatflows = sanitizeChatflows(getAllChatflowsApi.data)
+            const dataStr = JSON.stringify({ Chatflows: sanitizedChatflows }, null, 2)
+            const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr)
+
+            const exportFileDefaultName = 'AllChatflows.json'
+
+            const linkElement = document.createElement('a')
+            linkElement.setAttribute('href', dataUri)
+            linkElement.setAttribute('download', exportFileDefaultName)
+            linkElement.click()
+            exportAllChatflowsSuccess()
+        }
+    }, [getAllChatflowsApi.error, getAllChatflowsApi.data])
 
     const prevOpen = useRef(open)
     useEffect(() => {
@@ -135,6 +242,29 @@ const ProfileSection = ({ username, handleLogout }) => {
                                                     }
                                                 }}
                                             >
+                                                <ListItemButton
+                                                    sx={{ borderRadius: `${customization.borderRadius}px` }}
+                                                    onClick={() => {
+                                                        getAllChatflowsApi.request()
+                                                    }}
+                                                >
+                                                    <ListItemIcon>
+                                                        <IconFileExport stroke={1.5} size='1.3rem' />
+                                                    </ListItemIcon>
+                                                    <ListItemText primary={<Typography variant='body2'>Export Chatflows</Typography>} />
+                                                </ListItemButton>
+                                                <ListItemButton
+                                                    sx={{ borderRadius: `${customization.borderRadius}px` }}
+                                                    onClick={() => {
+                                                        importAllChatflows()
+                                                    }}
+                                                >
+                                                    <ListItemIcon>
+                                                        <IconFileUpload stroke={1.5} size='1.3rem' />
+                                                    </ListItemIcon>
+                                                    <ListItemText primary={<Typography variant='body2'>Import Chatflows</Typography>} />
+                                                </ListItemButton>
+                                                <input ref={inputRef} type='file' hidden onChange={fileChange} />
                                                 <ListItemButton
                                                     sx={{ borderRadius: `${customization.borderRadius}px` }}
                                                     onClick={() => {
